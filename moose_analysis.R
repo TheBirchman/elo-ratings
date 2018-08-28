@@ -92,35 +92,35 @@ game_wrs$bAdv <- bAdvCalc(game_wrs$bWR)
 # for every game, calculate bRtg and rRtg & Elo Adjustment
 # dynER is an elo rating calculated with a blue team probability adjustment that CONSIDERS GAME SIZE
 # statER is an elo rating calculated with a blue team probability that is static (and equals TOTAL blue WR, regardless of game size)
-for (i in 1:(no_of_games)) {
-  bPlayers <- data.frame("players" = matrix(unlist(as.list(str_split(game_results$bTeam[i], " "))), 
-                                            nrow=round(game_results$Plyr_no[game_results$Game == i] * .6), 
-                                            byrow=T),
-                         stringsAsFactors = FALSE)
-  bPlayers <- dplyr::inner_join(bPlayers, elo_ratings, by = c("players" = "players"))
-  bRatingsDyn <- sum(bPlayers$dynER) / round(game_results$Plyr_no[game_results$Game == i] * .6)
-  bRatingsStat <- sum(bPlayers$statER) / round(game_results$Plyr_no[game_results$Game == i] * .6)
-  
-  rPlayers <- data.frame("players" = matrix(unlist(as.list(str_split(game_results$rTeam[i], " "))), 
-                                            nrow=round(game_results$Plyr_no[game_results$Game == i] * .4), 
-                                            byrow=T),
-                         stringsAsFactors = FALSE)
-  rPlayers <- dplyr::inner_join(rPlayers, elo_ratings, by = c("players" = "players"))
-  rRatingsDyn <- sum(rPlayers$dynER) / round(game_results$Plyr_no[game_results$Game == i] * .4)
-  rRatingsStat <- sum(rPlayers$statER) / round(game_results$Plyr_no[game_results$Game == i] * .4)
-  
-  game_results$bRatingDyn[i] <- bRatingsDyn
-  game_results$rRatingDyn[i] <- rRatingsDyn
-  
-  game_results$bRatingStat[i] <- bRatingsStat
-  game_results$rRatingStat[i] <- rRatingsStat
-  # modifier for the likelihood that Blue will win any game
-  ## tot_bAdv calculated based on TOTAL WIN RATE OF ALL GAME SIZES probability only
-  tot_bAdv <- bAdvCalc(tot_bWR) 
-  ## bAdv calculated & applied based on dynamic win rates of each game size
-  bAdv <- game_wrs$bAdv[game_wrs$`# of Players`==game_results$Plyr_no[i]]
-  
-  ## DYNAMIC WIN RATES --------------------------------------------------------------
+eloLoop <- function(elo_ratings, game_results, no_of_games, tot_bAdv, game_wrs){
+  for (i in 1:(no_of_games)) {
+    # browser()
+    bPlayers <- data.frame("players" = matrix(unlist(as.list(str_split(game_results$bTeam[i], " "))), 
+                                              nrow=round(game_results$Plyr_no[game_results$Game == i] * .6), 
+                                              byrow=T),
+                           stringsAsFactors = FALSE)
+    bPlayers <- dplyr::inner_join(bPlayers, elo_ratings, by = c("players" = "players"))
+    bRatingsDyn <- sum(bPlayers$dynER) / round(game_results$Plyr_no[game_results$Game == i] * .6)
+    bRatingsStat <- sum(bPlayers$statER) / round(game_results$Plyr_no[game_results$Game == i] * .6)
+    
+    rPlayers <- data.frame("players" = matrix(unlist(as.list(str_split(game_results$rTeam[i], " "))), 
+                                              nrow=round(game_results$Plyr_no[game_results$Game == i] * .4), 
+                                              byrow=T),
+                           stringsAsFactors = FALSE)
+    rPlayers <- dplyr::inner_join(rPlayers, elo_ratings, by = c("players" = "players"))
+    rRatingsDyn <- sum(rPlayers$dynER) / round(game_results$Plyr_no[game_results$Game == i] * .4)
+    rRatingsStat <- sum(rPlayers$statER) / round(game_results$Plyr_no[game_results$Game == i] * .4)
+    
+    game_results$bRatingDyn[i] <- bRatingsDyn
+    game_results$rRatingDyn[i] <- rRatingsDyn
+    
+    game_results$bRatingStat[i] <- bRatingsStat
+    game_results$rRatingStat[i] <- rRatingsStat
+
+    ## bAdv calculated & applied based on dynamic win rates of each game size
+    bAdv <- game_wrs$bAdv[game_wrs$`# of Players`==game_results$Plyr_no[i]]
+    
+    ## DYNAMIC WIN RATES --------------------------------------------------------------
     b <- 10 ^ ((bRatingsDyn + bAdv)/400)
     r <- 10 ^ (rRatingsDyn/400)
     
@@ -136,9 +136,9 @@ for (i in 1:(no_of_games)) {
     bPlayers$dynER <- round(bPlayers$dynER + bEloAdj)
     rPlayers$dynER <- round(rPlayers$dynER + rEloAdj)
     gmPlayers <- rbind(bPlayers, rPlayers)
-  ## --------------------------------------------------------------------------------
+    ## --------------------------------------------------------------------------------
     
-  ## STATIC WIN RATE  ---------------------------------------------------------------
+    ## STATIC WIN RATE  ---------------------------------------------------------------
     b <- 10 ^ ((bRatingsStat + tot_bAdv)/400)
     r <- 10 ^ (rRatingsStat/400)
     
@@ -157,9 +157,15 @@ for (i in 1:(no_of_games)) {
     elo_ratings$dynER <- if_else(is.na(elo_ratings$dynER.y), elo_ratings$dynER.x, elo_ratings$dynER.y)
     elo_ratings$statER <- if_else(is.na(elo_ratings$statER.y), elo_ratings$statER.x, elo_ratings$statER.y)
     elo_ratings <- elo_ratings %>%  select(-dynER.x, -dynER.y, -statER.x, -statER.y)
-  ## --------------------------------------------------------------------------------
-  
+    ## --------------------------------------------------------------------------------
+  }
+  return(elo_ratings)
 }
+
+# modifier for the likelihood that Blue will win any game
+## tot_bAdv calculated based on TOTAL WIN RATE OF ALL GAME SIZES probability only
+tot_bAdv <- bAdvCalc(tot_bWR) 
+elo_ratings <- eloLoop(elo_ratings, game_results, no_of_games, tot_bAdv, game_wrs)
 
 # calculate games played for every player
 gp.df <- data.frame("player" = matrix(unlist(players), nrow=totPlayers, byrow=T),
