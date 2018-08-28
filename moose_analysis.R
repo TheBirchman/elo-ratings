@@ -205,3 +205,5 @@ elo_ratings <- elo_ratings[c('players', 'gp', 'statER', 'dynER')]
 elo_ratings_rnk <- elo_ratings %>% filter(gp >= 20)
 elo_ratings_rnk <- tibble::rowid_to_column(elo_ratings_rnk, "rank")
 elo_ratings_rnk <- elo_ratings_rnk[c('rank','players', 'gp', 'statER', 'dynER')]
+
+rm(gp.df, game_teams, no_of_games, tot_bAdv, tot_bWR, totPlayers)
