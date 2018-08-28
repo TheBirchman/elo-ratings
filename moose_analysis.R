@@ -28,13 +28,9 @@ colnames(tracker)[24] <- "JakeYunker"
 tracker <- tracker %>% filter(Game <=no_of_games)
 tracker$winners <- rowSums(tracker == 'W') - 1
 
-for (i in 1:no_of_games){
-  if(tracker$bResult[i]=='W') {
-    tracker$winChk[i] <- round(.6 * tracker$Plyr_no[i])
-  } else {
-    tracker$winChk[i] <- round(.4 * tracker$Plyr_no[i])
-  }
-}
+# create a column for how many winning players there SHOULD be for each game
+tracker$winChk <- ifelse(tracker$bResult=='W', round(.6 * tracker$Plyr_no), round(.4 * tracker$Plyr_no))
+
 # make sure that there are the right number of winners/losers and that the player check number matches the count of players in the game
 tracker$winEval <- tracker$winChk - tracker$winners
 moose_results <- tracker %>% filter(winEval == 0, `Player Check` == Plyr_no)
@@ -44,46 +40,35 @@ no_of_games <- nrow(moose_results)
 moose_results$Game <- NULL
 moose_results <- tibble::rowid_to_column(moose_results, "Game")
 
-# read in moose tracker csv
-# moose_results <- read.csv('C:/Users/z076829/Desktop/moose_results.csv', header=TRUE, stringsAsFactors = FALSE)
-
-# moose_results[is.na(moose_results)] <- 0
-# moose_results$X.1 <- NULL
-# moose_results$X <- NULL
-
 # create list of all players in the moose tracker
 players <- vector("list", totPlayers)
-for (p in 5:(totPlayers+4)) {
-  pPos <- sum(sapply(players, is.null))
-  players[[pPos]] <- colnames(moose_results[p])
-}
+players <- as.list(str_split(colnames(moose_results[, 1:totPlayers+4]), " "))
 
 # create base Elo rating df for all players
-elo_ratings <- data.frame("players" = matrix(unlist(players), nrow=p-4, byrow=T),
+elo_ratings <- data.frame("players" = matrix(unlist(players)),
                           "dynER" = 1000,
                           "statER" = 1000,
                           stringsAsFactors = FALSE)
 
-# create new dataframe tracking only results (no player info)  
+# create new dataframe tracking only game outcomes (no player info)  
 game_results <- moose_results[,1:4]
 
 # for every game played, identify who played and on which team. then add a blue team/red team column
-for (j in 1:no_of_games){
-  rTeam <- vector("list", round(moose_results$Plyr_no[j] * .4))
-  bTeam <- vector("list", moose_results$Plyr_no[j] - length(rTeam))
-  for (i in 5:(totPlayers+4)) {
-    if (moose_results$bResult[j] == moose_results[j, i]){
-      bListPos <- sum(sapply(bTeam, is.null))
-      bTeam[[bListPos]] <- colnames(moose_results[i])
-    }
-    else if (moose_results$rResult[j] == moose_results[j, i]){
-      rListPos <- sum(sapply(rTeam, is.null))
-      rTeam[[rListPos]] <- colnames(moose_results[i])
-    }
-  }
-  game_results$bTeam[j] <- paste(bTeam,collapse=" ") 
-  game_results$rTeam[j] <- paste(rTeam,collapse=" ")
+teamsFunc <- function(x) {
+  blue <- ifelse(length(names(which(x != 'L' & x!=0))) > 
+                   length(names(which(x != 'W' & x!=0))),
+           paste(unlist(as.list(names(which(x != 'L' & x!=0)))), collapse = ' '),
+           paste(unlist(as.list(names(which(x != 'W' & x!=0)))), collapse = ' '))
+  red <- ifelse(length(names(which(x != 'L' & x!=0))) > 
+                  length(names(which(x != 'W' & x!=0))),
+                paste(unlist(as.list(names(which(x != 'W' & x!=0)))), collapse = ' '),
+                paste(unlist(as.list(names(which(x != 'L' & x!=0)))), collapse = ' '))
+  c(blue, red)
 }
+
+game_teams <- apply(moose_results[1:totPlayers+4], 1, teamsFunc)
+game_results$bTeam <- t(game_teams)[,1]
+game_results$rTeam <- t(game_teams)[,2]
 
 # f(x) to calculate elo rtg blue advantage modifier
 bAdvCalc <- function (win_prob) {
@@ -102,9 +87,7 @@ bAdvCalc <- function (win_prob) {
 }
 
 # calculate bAdv for every game size
-for (x in 1:6){
-  game_wrs$bAdv[x] <- bAdvCalc(game_wrs$bWR[x]) 
-}
+game_wrs$bAdv <- bAdvCalc(game_wrs$bWR)
 
 # for every game, calculate bRtg and rRtg & Elo Adjustment
 # dynER is an elo rating calculated with a blue team probability adjustment that CONSIDERS GAME SIZE
@@ -182,11 +165,7 @@ for (i in 1:(no_of_games)) {
 gp.df <- data.frame("player" = matrix(unlist(players), nrow=totPlayers, byrow=T),
                     "gp" = 0,
                     stringsAsFactors = FALSE)
-for (p in 5:(totPlayers+4)){
-
-  gp.df$gp[gp.df$player == colnames(moose_results)[p]] <- nrow(moose_results) - sum(moose_results[, p]==0, na.rm=TRUE)
-  
-}
+gp.df$gp <- apply(moose_results[1:totPlayers+4], 2, function(x) sum(x!=0))
 
 # calculate basic win rates & red selection % for every player
 wr.df <- data.frame("player" = matrix(unlist(players), nrow=totPlayers, byrow=T),
@@ -195,20 +174,10 @@ wr.df <- data.frame("player" = matrix(unlist(players), nrow=totPlayers, byrow=T)
                     "rWins" = 0,
                     stringsAsFactors = FALSE)
 
-for (p in 1:totPlayers){
-  for (g in 1:no_of_games){
-    if (grepl(wr.df$player[p], game_results$bTeam[g])){
-      wr.df$bGames[p] <- wr.df$bGames[p]+1
-      if(game_results$bResult[g] == 'W'){
-        wr.df$bWins[p] <- wr.df$bWins[p] + 1
-      }
-    } else if(grepl(wr.df$player[p], game_results$rTeam[g])){
-      if(game_results$rResult[g] == 'W'){
-        wr.df$rWins[p] <- wr.df$rWins[p] + 1
-      }
-    }
-    }
-}
+wr.df$bGames <- sapply(wr.df$player, function(x) length(grep(x, unlist(as.list(str_split(game_results$bTeam, " "))))))
+wr.df$bWins <- sapply(wr.df$player, function(x) sum(ifelse(grepl(x, game_results$bTeam) & game_results$bResult=='W', 1, 0)))
+wr.df$rWins <- sapply(wr.df$player, function(x) sum(ifelse(grepl(x, game_results$rTeam) & game_results$rResult=='W', 1, 0)))
+
 
 wr.df <- wr.df %>% inner_join(gp.df) %>% mutate("rGames" = gp - bGames,
                                                 "r%" = paste0(round((rGames / gp)*100, 0), "%"), # how often a player is Red
@@ -234,7 +203,3 @@ elo_ratings <- elo_ratings[c('players', 'gp', 'statER', 'dynER')]
 elo_ratings_rnk <- elo_ratings %>% filter(gp >= 20)
 elo_ratings_rnk <- tibble::rowid_to_column(elo_ratings_rnk, "rank")
 elo_ratings_rnk <- elo_ratings_rnk[c('rank','players', 'gp', 'statER', 'dynER')]
-
-rm(bPlayers, gmPlayers, gp.df, rPlayers, tracker, b, bAdv, bEloAdj, bListPos, bProb, bRatings, bRatingsDyn, bRatingsStat, bResult,
-   bTeam, g, i, j, mt, no_of_games, players, pPos, r, rEloAdj, rListPos, rProb, rRatings, rRatingsDyn, rRatingsStat, rResult, rTeam,
-   tot_bAdv, tot_bWR, totPlayers, x)
