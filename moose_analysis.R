@@ -6,10 +6,10 @@ library(dplyr)
 mt <- gs_title("Secret Moose - Game Tracker.xlsx")
 tracker <- gs_read(ss=mt, ws = "MOOSE TRACKER", range = "B8:AB205")
 game_wrs <- gs_read(ss=mt, ws = "Win Rates by Player Total", range = "A1:C7")
+rm(mt)
 
 # format moose tracker
-tracker$X5 <- NULL
-tracker$X6 <- NULL
+tracker[, 5:6] <- NULL
 colnames(tracker)[2:4] <- c("Plyr_no", "bResult", "rResult")
 tracker$bResult[is.na(tracker$bResult)] <- "L"
 tracker$rResult[is.na(tracker$rResult)] <- "L"
@@ -22,8 +22,8 @@ tot_bWR <- sum(game_wrs$bWins) / (sum(game_wrs$bWins) + sum(game_wrs$bLosses))
 # people suck ass at filling out the sheet, so create a check system to ensure the number of red/blue players is accurate per game size
 no_of_games <- max(tracker$Game[tracker$Plyr_no > 0])
 totPlayers <- ncol(tracker) - 5
-colnames(tracker)[23] <- "DannyHanson"
-colnames(tracker)[24] <- "JakeYunker"
+# column name clean-up
+colnames(tracker) <- make.names(colnames(tracker), unique=TRUE)
 # filter table for only games played
 tracker <- tracker %>% filter(Game <=no_of_games)
 tracker$winners <- rowSums(tracker == 'W') - 1
@@ -33,19 +33,16 @@ tracker$winChk <- ifelse(tracker$bResult=='W', round(.6 * tracker$Plyr_no), roun
 
 # make sure that there are the right number of winners/losers and that the player check number matches the count of players in the game
 tracker$winEval <- tracker$winChk - tracker$winners
-moose_results <- tracker %>% filter(winEval == 0, `Player Check` == Plyr_no)
+moose_results <- tracker %>% filter(winEval == 0, Player.Check == Plyr_no)
+rm(tracker)
 # Recount max number of games now that we've removed some illegal ones
 no_of_games <- nrow(moose_results)
 # Resequence GameIDs
 moose_results$Game <- NULL
 moose_results <- tibble::rowid_to_column(moose_results, "Game")
 
-# create list of all players in the moose tracker
-players <- vector("list", totPlayers)
-players <- as.list(str_split(colnames(moose_results[, 1:totPlayers+4]), " "))
-
-# create base Elo rating df for all players
-elo_ratings <- data.frame("players" = matrix(unlist(players)),
+# create base Elo rating df for all players in the tracker
+elo_ratings <- data.frame("players" = colnames(moose_results[, 1:totPlayers+4]),
                           "dynER" = 1000,
                           "statER" = 1000,
                           stringsAsFactors = FALSE)
@@ -75,15 +72,12 @@ bAdvCalc <- function (win_prob) {
   
   numerator <- -((10^2.5)*win_prob)
   denominator <- -(1-win_prob)
-  
   xRtg <- numerator/denominator
-  
   adv <- log(xRtg) / log(10)
   adv <- adv - (5/2)
   adv <- adv*400
   
   return(adv)
-  
 }
 
 # calculate bAdv for every game size
@@ -94,7 +88,6 @@ game_wrs$bAdv <- bAdvCalc(game_wrs$bWR)
 # statER is an elo rating calculated with a blue team probability that is static (and equals TOTAL blue WR, regardless of game size)
 eloLoop <- function(elo_ratings, game_results, no_of_games, tot_bAdv, game_wrs){
   for (i in 1:(no_of_games)) {
-    # browser()
     bPlayers <- data.frame("players" = matrix(unlist(as.list(str_split(game_results$bTeam[i], " "))), 
                                               nrow=round(game_results$Plyr_no[game_results$Game == i] * .6), 
                                               byrow=T),
@@ -168,21 +161,25 @@ tot_bAdv <- bAdvCalc(tot_bWR)
 elo_ratings <- eloLoop(elo_ratings, game_results, no_of_games, tot_bAdv, game_wrs)
 
 # calculate games played for every player
-gp.df <- data.frame("player" = matrix(unlist(players), nrow=totPlayers, byrow=T),
+gp.df <- data.frame("player" = colnames(moose_results[, 1:totPlayers+4]),
                     "gp" = 0,
                     stringsAsFactors = FALSE)
 gp.df$gp <- apply(moose_results[1:totPlayers+4], 2, function(x) sum(x!=0))
 
 # calculate basic win rates & red selection % for every player
-wr.df <- data.frame("player" = matrix(unlist(players), nrow=totPlayers, byrow=T),
+wr.df <- data.frame("player" = colnames(moose_results[, 1:totPlayers+4]),
                     "bGames" = 0,
                     "bWins" = 0,
                     "rWins" = 0,
                     stringsAsFactors = FALSE)
 
-wr.df$bGames <- sapply(wr.df$player, function(x) length(grep(x, unlist(as.list(str_split(game_results$bTeam, " "))))))
-wr.df$bWins <- sapply(wr.df$player, function(x) sum(ifelse(grepl(x, game_results$bTeam) & game_results$bResult=='W', 1, 0)))
-wr.df$rWins <- sapply(wr.df$player, function(x) sum(ifelse(grepl(x, game_results$rTeam) & game_results$rResult=='W', 1, 0)))
+wr.df$bGames <- sapply(wr.df$player, 
+                       function(x) length(grep(x, unlist(as.list(str_split(game_results$bTeam, " "))))))
+wr.df$bWins <- sapply(wr.df$player, 
+                      function(x) sum(ifelse(grepl(x, game_results$bTeam) & game_results$bResult=='W', 1, 0)))
+wr.df$rWins <- sapply(wr.df$player, 
+                      function(x) sum(ifelse(grepl(x, game_results$rTeam) & game_results$rResult=='W', 1, 0)))
+rm(game_results)
 
 
 wr.df <- wr.df %>% inner_join(gp.df) %>% mutate("rGames" = gp - bGames,
@@ -201,7 +198,6 @@ wr.df <- wr.df %>% inner_join(gp.df) %>% mutate("rGames" = gp - bGames,
   select(-rGames, -bGames, -bWins, -rWins, -xBW, -xRW)
   
 elo_ratings <- elo_ratings %>% inner_join(gp.df, by=c("players"="player"))
-# elo_ratings <- elo_ratings %>% filter(gp > 10)
 elo_ratings <- elo_ratings[order(-elo_ratings$dynER),]
 elo_ratings <- elo_ratings[c('players', 'gp', 'statER', 'dynER')]
 
