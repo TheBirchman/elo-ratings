@@ -1,5 +1,6 @@
 library(tidyverse)
 library(googlesheets)
+library(plyr)
 library(dplyr)
 
 # read in google sheets
@@ -173,14 +174,18 @@ wr.df <- data.frame("player" = colnames(moose_results[, 1:totPlayers+4]),
                     "rWins" = 0,
                     stringsAsFactors = FALSE)
 
-wr.df$bGames <- sapply(wr.df$player, 
-                       function(x) length(grep(x, unlist(as.list(str_split(game_results$bTeam, " "))))))
-wr.df$bWins <- sapply(wr.df$player, 
-                      function(x) sum(ifelse(grepl(x, game_results$bTeam) & game_results$bResult=='W', 1, 0)))
-wr.df$rWins <- sapply(wr.df$player, 
-                      function(x) sum(ifelse(grepl(x, game_results$rTeam) & game_results$rResult=='W', 1, 0)))
-rm(game_results)
+# function to calculate the total number of blue games played, blue wins and red wins for every player
+winRateFunc <- function(player) {
+  
+  bGames <- game_results %>% filter(grepl(player, bTeam)==TRUE) %>% nrow(.)
+  bWins  <- game_results %>% filter(grepl(player, bTeam)==TRUE, bResult == "W") %>% nrow(.)
+  rWins <- game_results %>% filter(grepl(player, rTeam)==TRUE, rResult == "W") %>% nrow(.)
+  
+  return(c(bGames, bWins, rWins))
+}
 
+# stitch returned list of vectors from winRateFunc into a dataframe & insert into wr.df
+wr.df[, 2:4] <- plyr::ldply(lapply(as.list(wr.df$player), winRateFunc))[, 1:3]
 
 wr.df <- wr.df %>% inner_join(gp.df) %>% mutate("rGames" = gp - bGames,
                                                 "r%" = paste0(round((rGames / gp)*100, 0), "%"), # how often a player is Red
