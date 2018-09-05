@@ -2,6 +2,7 @@ library(tidyverse)
 library(googlesheets)
 library(plyr)
 library(dplyr)
+library(plotly)
 
 # read in google sheets
 mt <- gs_title("Secret Moose - Game Tracker.xlsx")
@@ -83,11 +84,15 @@ bAdvCalc <- function (win_prob) {
 
 # calculate bAdv for every game size
 game_wrs$bAdv <- bAdvCalc(game_wrs$bWR)
+# create blank dataframe to track each player's dynamic elo rating over time
+dynER_tracker <- data.frame("game_no" = as.integer(),
+                            "player" = as.character(),
+                            "dynER" = as.integer())
 
 # for every game, calculate bRtg and rRtg & Elo Adjustment
 # dynER is an elo rating calculated with a blue team probability adjustment that CONSIDERS GAME SIZE
 # statER is an elo rating calculated with a blue team probability that is static (and equals TOTAL blue WR, regardless of game size)
-eloLoop <- function(elo_ratings, game_results, no_of_games, tot_bAdv, game_wrs){
+eloLoop <- function(elo_ratings, game_results, no_of_games, tot_bAdv, game_wrs, dynER_tracker){
   for (i in 1:(no_of_games)) {
     bPlayers <- data.frame("players" = matrix(unlist(as.list(str_split(game_results$bTeam[i], " "))), 
                                               nrow=round(game_results$Plyr_no[game_results$Game == i] * .6), 
@@ -152,14 +157,18 @@ eloLoop <- function(elo_ratings, game_results, no_of_games, tot_bAdv, game_wrs){
     elo_ratings$statER <- if_else(is.na(elo_ratings$statER.y), elo_ratings$statER.x, elo_ratings$statER.y)
     elo_ratings <- elo_ratings %>%  select(-dynER.x, -dynER.y, -statER.x, -statER.y)
     ## --------------------------------------------------------------------------------
+    gmPlayers$game_no <- i
+    dynER_tracker <- rbind(dynER_tracker, gmPlayers[, c(4, 1, 2)])
   }
-  return(elo_ratings)
+  return(list("total"=elo_ratings, "cumulative"=dynER_tracker))
 }
 
 # modifier for the likelihood that Blue will win any game
 ## tot_bAdv calculated based on TOTAL WIN RATE OF ALL GAME SIZES probability only
 tot_bAdv <- bAdvCalc(tot_bWR) 
-elo_ratings <- eloLoop(elo_ratings, game_results, no_of_games, tot_bAdv, game_wrs)
+ratings_vector <- eloLoop(elo_ratings, game_results, no_of_games, tot_bAdv, game_wrs, dynER_tracker)
+elo_ratings <- as.data.frame(ratings_vector$total)
+dynER_tracker <- as.data.frame(ratings_vector$cumulative)
 
 # calculate games played for every player
 gp.df <- data.frame("player" = colnames(moose_results[, 1:totPlayers+4]),
@@ -210,5 +219,15 @@ elo_ratings <- elo_ratings[c('players', 'gp', 'statER', 'dynER')]
 elo_ratings_rnk <- elo_ratings %>% filter(gp >= 20)
 elo_ratings_rnk <- tibble::rowid_to_column(elo_ratings_rnk, "rank")
 elo_ratings_rnk <- elo_ratings_rnk[c('rank','players', 'gp', 'statER', 'dynER')]
+
+### FORMAT THE CUMULATIVE DYNAMIC ELO RATING TRACKER & GRAPH OUTPUTS
+dynER_tracker <- dynER_tracker[order(dynER_tracker$players), ]
+dynER_tracker$gms_played <- ave(dynER_tracker$players, dynER_tracker$players, FUN=seq_along)
+dynER_tracker$players <- as.factor(dynER_tracker$players)
+dynER_tracker$gms_played <- as.integer(dynER_tracker$gms_played)
+
+elo_graph <- plot_ly(dynER_tracker, x = ~gms_played, y = ~dynER, type = 'scatter', mode = 'lines', split = ~players) %>% 
+  layout(xaxis = list(title='Games Played'), yaxis = list(title='Dynamic Elo Rating'))
+elo_graph  
 
 rm(gp.df, game_teams, no_of_games, tot_bAdv, tot_bWR, totPlayers)
